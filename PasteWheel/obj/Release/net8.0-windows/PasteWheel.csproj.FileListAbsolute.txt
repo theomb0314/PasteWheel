@@ -1,0 +1,40 @@
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\WheelWindow.baml
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\App.baml
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\WheelWindow.g.cs
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\App.g.cs
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel_MarkupCompile.cache
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.g.resources
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.AssemblyInfoInputs.cache
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.AssemblyInfo.cs
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.csproj.CoreCompileInputs.cache
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\bin\Release\net8.0-windows\PasteWheel.exe
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\bin\Release\net8.0-windows\PasteWheel.deps.json
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\bin\Release\net8.0-windows\PasteWheel.runtimeconfig.json
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\bin\Release\net8.0-windows\PasteWheel.dll
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\bin\Release\net8.0-windows\PasteWheel.pdb
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.dll
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\refint\PasteWheel.dll
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.pdb
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\PasteWheel.genruntimeconfig.cache
+C:\Users\theom\Theomb\Project Ideas\GWFS\Upload\PasteWheel\obj\Release\net8.0-windows\ref\PasteWheel.dll
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\WheelWindow.baml
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\App.baml
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\WheelWindow.g.cs
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\App.g.cs
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel_MarkupCompile.cache
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.g.resources
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.AssemblyInfoInputs.cache
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.AssemblyInfo.cs
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.csproj.CoreCompileInputs.cache
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.dll
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\refint\PasteWheel.dll
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.pdb
+C:\Users\theom\OneDrive\Desktop\PasteWheel\bin\Release\net8.0-windows\PasteWheel.exe
+C:\Users\theom\OneDrive\Desktop\PasteWheel\bin\Release\net8.0-windows\PasteWheel.deps.json
+C:\Users\theom\OneDrive\Desktop\PasteWheel\bin\Release\net8.0-windows\PasteWheel.runtimeconfig.json
+C:\Users\theom\OneDrive\Desktop\PasteWheel\bin\Release\net8.0-windows\PasteWheel.dll
+C:\Users\theom\OneDrive\Desktop\PasteWheel\bin\Release\net8.0-windows\PasteWheel.pdb
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\PasteWheel.genruntimeconfig.cache
+C:\Users\theom\OneDrive\Desktop\PasteWheel\obj\Release\net8.0-windows\ref\PasteWheel.dll

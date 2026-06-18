@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>PasteWheel</AssemblyName>
+    <RootNamespace>PasteWheel</RootNamespace>
+    <Version>1.0.0</Version>
+    <!-- Keeps the published single-file exe self-contained-friendly -->
+    <SelfContained>false</SelfContained>
+    <!-- WPF owns DPI via the manifest (PerMonitorV2); WinForms' warning is moot here. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <!-- WPF + WinForms both ship global usings; drop the WinForms/Drawing ones so
+       Color/Brush/Point/Application resolve to WPF. WinForms is used explicitly
+       (aliased) only where the tray icon / cursor / screen APIs are needed. -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+</Project>
