@@ -2,7 +2,7 @@
 
 A tiny Windows tray app: press a hotkey, a radial menu pops up at your cursor, pick an
 item, and it's typed straight into whatever you were using. Your library is just files
-and folders — no database, no accounts.
+and folders.
 
 ## Run it
 
@@ -27,8 +27,6 @@ Everything lives in `C:\Users\<you>\PasteWheel\Pastes\` (tray → **Open paste f
 - The **file name** is the label; the **file contents** are what gets pasted.
 - Put `01_`, `02_` in front of names to set the order.
 - Drop a **.png/.jpg** in to paste an image. A `#hex` colour shows as a swatch.
-
-That's it — rearrange in File Explorer and the wheel updates itself.
 
 ## Settings
 
