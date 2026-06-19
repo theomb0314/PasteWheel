@@ -13,33 +13,38 @@ namespace PasteWheel;
 
 public partial class WheelWindow : Window
 {
-    // --- palette --- these are all tinted by the global opacity, except for hex swatches and image fills which are opaque.
+    // --- palette (Teenage-Engineering inspired: flat, neutral, one accent) ---
     private static readonly Color BackdropColor = Color.FromRgb(0x0E, 0x10, 0x16);
-    private static readonly Color SliceColor = Color.FromRgb(0x21, 0x24, 0x2D); 
-    private static readonly Color FolderColor = Color.FromRgb(0x2A, 0x2E, 0x3A); 
-    private static readonly Color HubColor = Color.FromRgb(0x16, 0x18, 0x20); 
-    private static readonly Color AccentColor = Color.FromRgb(0xFF, 0x5A, 0x1F); 
-    private static readonly Color TextColor = Color.FromRgb(0xF2, 0xF3, 0xF5); 
-    private static readonly Color DimColor = Color.FromRgb(0x9A, 0xA0, 0xAC); 
+    private static readonly Color SliceColor = Color.FromRgb(0x21, 0x24, 0x2D);
+    private static readonly Color FolderColor = Color.FromRgb(0x2A, 0x2E, 0x3A);
+    private static readonly Color HubColor = Color.FromRgb(0x16, 0x18, 0x20);
+    private static readonly Color AccentColor = Color.FromRgb(0xFF, 0x5A, 0x1F);
+    private static readonly Color TextColor = Color.FromRgb(0xF4, 0xF5, 0xF7);
+    private static readonly Color DimColor = Color.FromRgb(0xAE, 0xB4, 0xC0);
+
+    private const double BottomDeg = 180;   // 6 o'clock: where the ring starts
+    private const double RecentArcDeg = 26;  // ~7% of the circle, pinned at the bottom
+    private const double GapPx = 3.0;
+    private const double Pad = 56;
 
     private readonly PasteStore _store;
     private readonly Config _config;
     private readonly Stack<PasteNode> _stack = new();
     private PasteNode _current;
-    private int _selected = -1;
+    private int _selected = -1;   // index into _members, or -1 none, -2 recent wedge
 
-    // Geometry, recomputed from config each time the wheel opens.
-    private double _cx, _cy, _outerR, _innerR, _centerR;
-    private double _opacity = 1.0;
-    private const double GapPx = 3.0;
-    private const double Pad = 52;
+    private double _cx, _cy, _outerR, _innerR, _centerR, _opacity = 1.0;
 
+    // One drawn wedge: a node plus its angular span (degrees, clockwise from top).
+    private readonly List<(PasteNode node, double start, double end)> _members = new();
     private readonly List<Path> _slices = new();
-    private TextBlock? _previewName, _previewValue;
-    private Border? _previewSwatch;
-    private Rect _recentRect = Rect.Empty;
+    private Path? _recentPath;
+    private (double start, double end) _recentSpan;
+    private bool _hasRecent;
+    private readonly List<(Rect rect, int depth)> _crumbs = new();
+    private StackPanel? _hub;
 
-    // The folder chain (disk paths) of the last paste, for the "recent" chip.
+    // The folder chain (disk paths) of the last paste, for the recent wedge.
     private List<string> _recentChain = new();
     private string _recentLabel = "";
 
@@ -81,7 +86,7 @@ public partial class WheelWindow : Window
         PositionAtCursor();
         Render();
 
-        Opacity = 1;            // base value, so the window is never left invisible
+        Opacity = 1;
         Show();                 // shown without activation (ShowActivated=False)
         InstallHooks();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
@@ -137,16 +142,8 @@ public partial class WheelWindow : Window
     private void InstallHooks()
     {
         var hMod = NativeMethods.GetModuleHandle(null);
-        if (_kbHook == IntPtr.Zero)
-        {
-            _kbProc = KeyboardHook;
-            _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc, hMod, 0);
-        }
-        if (_mouseHook == IntPtr.Zero)
-        {
-            _mouseProc = MouseHook;
-            _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc, hMod, 0);
-        }
+        if (_kbHook == IntPtr.Zero) { _kbProc = KeyboardHook; _kbHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _kbProc, hMod, 0); }
+        if (_mouseHook == IntPtr.Zero) { _mouseProc = MouseHook; _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc, hMod, 0); }
     }
 
     private void RemoveHooks()
@@ -174,8 +171,7 @@ public partial class WheelWindow : Window
                            wParam == NativeMethods.WM_MBUTTONDOWN))
         {
             var m = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
-            if (IsOutsideDisc(m.x, m.y))
-                Dispatcher.BeginInvoke(Dismiss);
+            if (IsOutsideDisc(m.x, m.y)) Dispatcher.BeginInvoke(Dismiss);
         }
         return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
@@ -186,8 +182,7 @@ public partial class WheelWindow : Window
         double cx = (Left + Width / 2) * dpi.DpiScaleX;
         double cy = (Top + Height / 2) * dpi.DpiScaleY;
         double r = _outerR * dpi.DpiScaleX;
-        double dist = Math.Sqrt(Math.Pow(screenX - cx, 2) + Math.Pow(screenY - cy, 2));
-        return dist > r;
+        return Math.Sqrt(Math.Pow(screenX - cx, 2) + Math.Pow(screenY - cy, 2)) > r;
     }
 
     // ---------- rendering ----------
@@ -196,35 +191,61 @@ public partial class WheelWindow : Window
     {
         WheelCanvas.Children.Clear();
         _slices.Clear();
-        _recentRect = Rect.Empty;
+        _members.Clear();
+        _crumbs.Clear();
+        _recentPath = null;
+        _hasRecent = _stack.Count == 0 && _recentChain.Count > 0;
 
-        // Backdrop disc.
         AddCircle(_outerR + 8, Tinted(BackdropColor, 0.92));
 
-        var items = _current.Children;
-        int n = items.Count;
-        if (n == 0)
+        var slots = BuildSlots(_current.Children);
+        if (slots.Count == 0)
             WheelCanvas.Children.Add(Label("(empty folder)", _cx, _cy - 8, Tinted(DimColor, 1), 15, center: true));
         else
         {
-            double sweep = 360.0 / n;
-            for (int i = 0; i < n; i++)
-                AddSlice(items[i], i, i * sweep, (i + 1) * sweep);
+            // Content fills the circle from the bottom, clockwise, leaving a small
+            // arc at the bottom for the recent wedge when one exists.
+            double recentArc = _hasRecent ? RecentArcDeg : 0;
+            double contentStart = BottomDeg + recentArc / 2;
+            double slotSweep = (360 - recentArc) / slots.Count;
+
+            for (int s = 0; s < slots.Count; s++)
+            {
+                double slotStart = contentStart + s * slotSweep;
+                double sub = slotSweep / slots[s].Count;
+                for (int j = 0; j < slots[s].Count; j++)
+                    AddSlice(slots[s][j], slotStart + j * sub, slotStart + (j + 1) * sub);
+            }
         }
 
-        AddCenter();
+        if (_hasRecent) AddRecentWedge();
+        AddHub();
         AddBreadcrumb();
-        AddRecentChip();
         UpdateSelectionVisuals();
     }
 
-    private void AddSlice(PasteNode node, int index, double start, double end)
+    // Groups siblings into slots: same SlotKey share a slot (split into sub-wedges).
+    private static List<List<PasteNode>> BuildSlots(List<PasteNode> children)
     {
-        Brush fill = SliceFill(node, index);
+        var slots = new List<List<PasteNode>>();
+        var byKey = new Dictionary<int, int>();
+        foreach (var c in children)
+        {
+            if (c.SlotKey is int k && byKey.TryGetValue(k, out int i)) slots[i].Add(c);
+            else { slots.Add(new List<PasteNode> { c }); if (c.SlotKey is int k2) byKey[k2] = slots.Count - 1; }
+        }
+        return slots;
+    }
+
+    private void AddSlice(PasteNode node, double start, double end)
+    {
+        int index = _members.Count;
+        _members.Add((node, start, end));
+
         var path = new Path
         {
-            Data = SliceGeometry(start, end),
-            Fill = fill,
+            Data = SliceGeometry(start, end, _innerR, _outerR),
+            Fill = SliceFill(node),
             Stroke = Tinted(Colors.White, 0.10),
             StrokeThickness = 1,
             Cursor = Cursors.Hand,
@@ -234,45 +255,38 @@ public partial class WheelWindow : Window
 
         double mid = (start + end) / 2;
         var lp = OnCircle(mid, (_innerR + _outerR) / 2);
-
         Color textOn = node.Swatch is { } sc ? BestTextColor(sc)
-                     : node.Accent is { } ac && node.IsFolder ? BestTextColor(ac)
-                     : TextColor;
+                     : node.Accent is { } ac && node.IsFolder ? BestTextColor(ac) : TextColor;
 
-        var panel = new StackPanel { Width = _outerR * 0.62 };
+        // Width the label to the wedge's arc so thin shared wedges trim instead of overflow.
+        double arc = (_innerR + _outerR) / 2 * (end - start) * Math.PI / 180;
+        double w = Math.Clamp(arc * 0.92, 38, _outerR * 0.66);
 
-        // Folder icon glyph (from _folder.json) sits above the label.
+        var panel = new StackPanel { Width = w, IsHitTestVisible = false };
         if (node.IsFolder && !string.IsNullOrEmpty(node.Icon))
-            panel.Children.Add(Text(node.Icon!, textOn, 20, mono: false, align: TextAlignment.Center));
-
-        panel.Children.Add(Text(node.IsFolder ? node.Label + "  ›" : node.Label, textOn, 14,
-            bold: true, align: TextAlignment.Center, wrap: true));
-
+            panel.Children.Add(Text(node.Icon!, textOn, 20, align: TextAlignment.Center));
+        panel.Children.Add(Text(node.IsFolder ? node.Label + "  ›" : node.Label, textOn, 14, bold: true, align: TextAlignment.Center, wrap: true));
         if (node.Kind == PasteKind.Hex)
-            panel.Children.Add(Text(node.Content.ToUpperInvariant(),
-                Color.FromArgb(0xCC, textOn.R, textOn.G, textOn.B), 11, mono: true, align: TextAlignment.Center));
+            panel.Children.Add(Text(node.Content.ToUpperInvariant(), Color.FromArgb(0xCC, textOn.R, textOn.G, textOn.B), 11, mono: true, align: TextAlignment.Center));
 
-        panel.IsHitTestVisible = false;
-        panel.Measure(new Size(_outerR * 0.62, 80));
-        Canvas.SetLeft(panel, lp.X - panel.Width / 2);
+        panel.Measure(new Size(w, 90));
+        Canvas.SetLeft(panel, lp.X - w / 2);
         Canvas.SetTop(panel, lp.Y - panel.DesiredSize.Height / 2);
         WheelCanvas.Children.Add(panel);
 
-        // Number badge near the rim (1–9) for keyboard reference.
         if (index < 9)
         {
-            var bp = OnCircle(mid, _outerR - 18);
+            var bp = OnCircle(mid, _outerR - 17);
             WheelCanvas.Children.Add(Label((index + 1).ToString(), bp.X, bp.Y - 9,
                 new SolidColorBrush(Color.FromArgb(0x88, textOn.R, textOn.G, textOn.B)), 11, center: true, mono: true));
         }
     }
 
-    // Picks a slice's fill: hex swatch / image thumbnail (opaque), or accent/neutral.
-    private Brush SliceFill(PasteNode node, int index)
+    private Brush SliceFill(PasteNode node)
     {
-        if (node.Swatch is { } c) return new SolidColorBrush(c);            // colour: opaque
+        if (node.Swatch is { } c) return new SolidColorBrush(c);                 // colour: opaque
         if (node.Kind == PasteKind.Image) return ImageFill(node.Path) ?? Tinted(SliceColor, 1);
-        if (node.IsFolder && node.Accent is { } a) return Tinted(a, 1);     // per-folder accent
+        if (node.IsFolder && node.Accent is { } a) return Tinted(a, 1);          // per-folder accent
         return Tinted(node.IsFolder ? FolderColor : SliceColor, 1);
     }
 
@@ -292,75 +306,76 @@ public partial class WheelWindow : Window
         catch { return null; }
     }
 
-    private void AddCenter()
+    // The thin recent wedge pinned at the bottom (jumps back to the last folder).
+    private void AddRecentWedge()
     {
-        bool inFolder = _stack.Count > 0;
+        _recentSpan = (BottomDeg - RecentArcDeg / 2, BottomDeg + RecentArcDeg / 2);
+        _recentPath = new Path
+        {
+            Data = SliceGeometry(_recentSpan.start, _recentSpan.end, _innerR, _outerR),
+            Fill = Tinted(AccentColor, 0.18),
+            Stroke = new SolidColorBrush(AccentColor),
+            StrokeThickness = 1.5,
+            Cursor = Cursors.Hand,
+        };
+        WheelCanvas.Children.Add(_recentPath);
+
+        var lp = OnCircle(BottomDeg, (_innerR + _outerR) / 2);
+        WheelCanvas.Children.Add(Label("⟲", lp.X, lp.Y - 12, new SolidColorBrush(AccentColor), 18, center: true));
+    }
+
+    private void AddHub()
+    {
         var ring = new Ellipse
         {
             Width = _centerR * 2, Height = _centerR * 2,
             Fill = Tinted(HubColor, 0.98),
-            Stroke = inFolder ? new SolidColorBrush(AccentColor) : Tinted(Colors.White, 0.12),
-            StrokeThickness = inFolder ? 2 : 1,
+            Stroke = _stack.Count > 0 ? new SolidColorBrush(AccentColor) : Tinted(Colors.White, 0.12),
+            StrokeThickness = _stack.Count > 0 ? 2 : 1,
             Cursor = Cursors.Hand,
         }.At(_cx - _centerR, _cy - _centerR);
         WheelCanvas.Children.Add(ring);
 
-        WheelCanvas.Children.Add(Label(inFolder ? "↩  Back" : "Esc",
-            _cx, _cy - _centerR * 0.62, inFolder ? new SolidColorBrush(TextColor) : Tinted(DimColor, 1), 12, center: true));
-
-        _previewSwatch = new Border
-        {
-            Width = 26, Height = 26, CornerRadius = new CornerRadius(5),
-            BorderBrush = Tinted(Colors.White, 0.25), BorderThickness = new Thickness(1),
-            Visibility = Visibility.Collapsed,
-        };
-        Canvas.SetLeft(_previewSwatch, _cx - 13);
-        Canvas.SetTop(_previewSwatch, _cy - 30);
-        WheelCanvas.Children.Add(_previewSwatch);
-
-        _previewName = Label("", _cx, _cy + 2, new SolidColorBrush(TextColor), 14, center: true, bold: true);
-        WheelCanvas.Children.Add(_previewName);
-        _previewValue = Label("", _cx, _cy + 24, Tinted(DimColor, 1), 11, center: true, mono: true);
-        WheelCanvas.Children.Add(_previewValue);
+        _hub = new StackPanel { IsHitTestVisible = false, Width = _centerR * 1.7 };
+        WheelCanvas.Children.Add(_hub);
     }
 
+    // Clickable breadcrumb along the bottom; click a crumb to jump up to that level.
     private void AddBreadcrumb()
     {
-        var crumbs = _stack.Reverse().Select(s => s.Label).Append(_current.Label);
-        string trail = _stack.Count == 0 ? "PasteWheel" : string.Join("  ›  ", crumbs);
-        WheelCanvas.Children.Add(Label(trail, _cx, _cy - _outerR - 34, Tinted(DimColor, 1), 13, center: true));
-    }
+        var chain = _stack.Reverse().Append(_current).ToList(); // [root, …, current]
+        double y = _cy + _outerR + 20;
 
-    // A fixed chip at root that jumps straight back to the last folder you pasted from.
-    private void AddRecentChip()
-    {
-        if (_stack.Count > 0 || _recentChain.Count == 0) return;
-
-        double w = _centerR * 1.5, h = 26;
-        double x = _cx - w / 2, y = _cy + _centerR * 0.42;
-        _recentRect = new Rect(x, y, w, h);
-
-        var chip = new Border
+        var pieces = new List<(string text, int depth)>();
+        for (int i = 0; i < chain.Count; i++)
         {
-            Width = w, Height = h, CornerRadius = new CornerRadius(13),
-            Background = Tinted(AccentColor, 0.16),
-            BorderBrush = new SolidColorBrush(AccentColor), BorderThickness = new Thickness(1),
-            Cursor = Cursors.Hand,
-            Child = new TextBlock
+            if (i > 0) pieces.Add(("  ›  ", -1));
+            pieces.Add((i == 0 ? "Home" : chain[i].Label, i));
+        }
+
+        double total = pieces.Sum(p => Measure(p.text, 13, bold: true));
+        double x = _cx - total / 2;
+        foreach (var (text, depth) in pieces)
+        {
+            double w = Measure(text, 13, bold: true);
+            bool active = depth == chain.Count - 1;
+            var tb = new TextBlock
             {
-                Text = "⟲  " + _recentLabel,
-                Foreground = new SolidColorBrush(TextColor),
-                FontSize = 11,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            },
-        };
-        chip.At(x, y);
-        WheelCanvas.Children.Add(chip);
+                Text = text, FontSize = 13, FontWeight = FontWeights.Bold,
+                FontFamily = new FontFamily("Segoe UI"),
+                Foreground = depth < 0 ? Tinted(DimColor, 0.6)
+                           : active ? new SolidColorBrush(TextColor) : new SolidColorBrush(AccentColor),
+                Cursor = depth >= 0 && !active ? Cursors.Hand : Cursors.Arrow,
+            };
+            Canvas.SetLeft(tb, x);
+            Canvas.SetTop(tb, y);
+            WheelCanvas.Children.Add(tb);
+            if (depth >= 0) _crumbs.Add((new Rect(x, y, w, 20), depth));
+            x += w;
+        }
     }
 
-    // ---------- selection ----------
+    // ---------- selection / hub preview ----------
 
     private void UpdateSelectionVisuals()
     {
@@ -370,33 +385,58 @@ public partial class WheelWindow : Window
             _slices[i].Stroke = sel ? new SolidColorBrush(AccentColor) : Tinted(Colors.White, 0.10);
             _slices[i].StrokeThickness = sel ? 2.5 : 1;
         }
+        if (_recentPath != null)
+            _recentPath.StrokeThickness = _selected == -2 ? 3 : 1.5;
 
-        if (_selected >= 0 && _selected < _current.Children.Count)
+        _hub!.Children.Clear();
+        if (_selected == -2)
+            FillHub(null, "⟲ Recent", _recentLabel);
+        else if (_selected >= 0 && _selected < _members.Count)
         {
-            var node = _current.Children[_selected];
-            _previewName!.Text = node.Label;
-            _previewValue!.Text = node.Preview;
-            if (node.Swatch is { } c)
-            {
-                _previewSwatch!.Background = new SolidColorBrush(c);
-                _previewSwatch.Visibility = Visibility.Visible;
-                Place(_previewName, _cy + 10);
-            }
-            else
-            {
-                _previewSwatch!.Visibility = Visibility.Collapsed;
-                Place(_previewName, _cy - 6);
-            }
+            var n = _members[_selected].node;
+            FillHub(n.Swatch, n.Label, n.Preview);
         }
         else
-        {
-            _previewName!.Text = "";
-            _previewValue!.Text = "";
-            _previewSwatch!.Visibility = Visibility.Collapsed;
-        }
+            FillHub(null, _stack.Count > 0 ? "↩ Back" : "Esc to close", null, hint: true);
     }
 
-    private void Place(TextBlock tb, double top) { Canvas.SetTop(tb, top); Center(tb, _cx); }
+    // Lays out the centred hub content: optional swatch, a title, and a value line.
+    private void FillHub(Color? swatch, string title, string? value, bool hint = false)
+    {
+        if (swatch is { } c)
+            _hub!.Children.Add(new Border
+            {
+                Width = 26, Height = 26, CornerRadius = new CornerRadius(5),
+                Background = new SolidColorBrush(c),
+                BorderBrush = Tinted(Colors.White, 0.25), BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 6),
+            });
+
+        _hub!.Children.Add(new TextBlock
+        {
+            Text = title,
+            Foreground = hint ? Tinted(DimColor, 1) : new SolidColorBrush(TextColor),
+            FontSize = 15, FontWeight = hint ? FontWeights.Normal : FontWeights.SemiBold,
+            FontFamily = new FontFamily("Segoe UI"),
+            TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = _centerR * 1.7,
+        });
+
+        if (!string.IsNullOrEmpty(value))
+            _hub!.Children.Add(new TextBlock
+            {
+                Text = value,
+                Foreground = new SolidColorBrush(DimColor),
+                FontSize = 12, FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                TextAlignment = TextAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = _centerR * 1.7,
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+
+        _hub.Measure(new Size(_centerR * 1.7, _centerR * 2));
+        Canvas.SetLeft(_hub, _cx - _hub.Width / 2);
+        Canvas.SetTop(_hub, _cy - _hub.DesiredSize.Height / 2);
+    }
 
     private void SetSelected(int index)
     {
@@ -409,26 +449,38 @@ public partial class WheelWindow : Window
 
     private void OnMouseMove(object sender, MouseEventArgs e) => SetSelected(HitTest(e.GetPosition(WheelCanvas)));
 
+    // Returns a member index, -2 for the recent wedge, or -1 for none.
     private int HitTest(Point p)
     {
         double dx = p.X - _cx, dy = p.Y - _cy;
         double r = Math.Sqrt(dx * dx + dy * dy);
-        if (r < _centerR || r > _outerR || _current.Children.Count == 0) return -1;
+        if (r < _centerR || r > _outerR) return -1;
 
         double theta = Math.Atan2(dx, -dy) * 180 / Math.PI; // clockwise from top
         if (theta < 0) theta += 360;
-        int idx = (int)(theta / (360.0 / _current.Children.Count));
-        return Math.Min(idx, _current.Children.Count - 1);
+        if (_hasRecent && AngleContains(_recentSpan.start, _recentSpan.end, theta)) return -2;
+        for (int i = 0; i < _members.Count; i++)
+            if (AngleContains(_members[i].start, _members[i].end, theta)) return i;
+        return -1;
+    }
+
+    private static bool AngleContains(double start, double end, double theta)
+    {
+        double s = ((start % 360) + 360) % 360;
+        double d = ((theta - s) % 360 + 360) % 360;
+        return d <= end - start;
     }
 
     private void OnClick(object sender, MouseButtonEventArgs e)
     {
         var p = e.GetPosition(WheelCanvas);
-        if (_recentRect.Contains(p)) { NavigateToRecent(); return; }
-        double r = Math.Sqrt(Math.Pow(p.X - _cx, 2) + Math.Pow(p.Y - _cy, 2));
-        if (r < _centerR) { NavigateUp(); return; }
-        int idx = HitTest(p);
-        if (idx >= 0) Activate(idx);
+        foreach (var (rect, depth) in _crumbs)
+            if (rect.Contains(p)) { NavigateToDepth(depth); return; }
+
+        int hit = HitTest(p);
+        if (hit == -2) { NavigateToRecent(); return; }
+        if (hit >= 0) { Activate(hit); return; }
+        if (Math.Sqrt(Math.Pow(p.X - _cx, 2) + Math.Pow(p.Y - _cy, 2)) < _centerR) NavigateUp();
     }
 
     private const int VK_ESCAPE = 0x1B, VK_BACK = 0x08, VK_RETURN = 0x0D;
@@ -442,20 +494,20 @@ public partial class WheelWindow : Window
         {
             case VK_ESCAPE: Dismiss(); return true;
             case VK_BACK: NavigateUp(); return true;
-            case VK_RETURN: if (_selected >= 0) Activate(_selected); return true;
+            case VK_RETURN: if (_selected >= 0) Activate(_selected); else if (_selected == -2) NavigateToRecent(); return true;
             case VK_LEFT or VK_UP: Step(-1); return true;
             case VK_RIGHT or VK_DOWN: Step(+1); return true;
             case VK_0 or VK_NUMPAD0: NavigateToRecent(); return true;
             default:
                 int digit = DigitFromVk(vk);
-                if (digit >= 1 && digit <= _current.Children.Count) { Activate(digit - 1); return true; }
+                if (digit >= 1 && digit <= _members.Count) { Activate(digit - 1); return true; }
                 return false;
         }
     }
 
     private void Step(int dir)
     {
-        int n = _current.Children.Count;
+        int n = _members.Count;
         if (n == 0) return;
         _selected = _selected < 0 ? (dir > 0 ? 0 : n - 1) : (_selected + dir + n) % n;
         UpdateSelectionVisuals();
@@ -472,25 +524,13 @@ public partial class WheelWindow : Window
 
     private void Activate(int index)
     {
-        if (index < 0 || index >= _current.Children.Count) return;
-        var node = _current.Children[index];
-
-        if (node.IsFolder)
-        {
-            _stack.Push(_current);
-            _current = node;
-            _selected = -1;
-            Render();
-        }
-        else
-        {
-            RememberRecent();
-            Dismiss();
-            OnPaste?.Invoke(node);
-        }
+        if (index < 0 || index >= _members.Count) return;
+        var node = _members[index].node;
+        if (node.IsFolder) { _stack.Push(_current); _current = node; _selected = -1; Render(); }
+        else { RememberRecent(); Dismiss(); OnPaste?.Invoke(node); }
     }
 
-    // Captures the folder chain of the just-used paste for the recent chip.
+    // Captures the folder chain of the just-used paste for the recent wedge.
     private void RememberRecent()
     {
         if (_current == _store.Root) { _recentChain = new(); _recentLabel = ""; return; }
@@ -512,6 +552,18 @@ public partial class WheelWindow : Window
         Render();
     }
 
+    // Jumps to a level in the current breadcrumb (0 = Home/root).
+    private void NavigateToDepth(int depth)
+    {
+        var chain = _stack.Reverse().Append(_current).ToList();
+        if (depth < 0 || depth >= chain.Count) return;
+        _stack.Clear();
+        for (int i = 0; i < depth; i++) _stack.Push(chain[i]);
+        _current = chain[depth];
+        _selected = -1;
+        Render();
+    }
+
     private void NavigateUp()
     {
         if (_stack.Count > 0) { _current = _stack.Pop(); _selected = -1; Render(); }
@@ -520,26 +572,26 @@ public partial class WheelWindow : Window
 
     // ---------- geometry / drawing helpers ----------
 
-    // Builds an annular sector with uniform-width (parallel-edged) gaps between wedges.
-    private Geometry SliceGeometry(double startDeg, double endDeg)
+    // Annular sector with uniform-width (parallel-edged) gaps between wedges.
+    private Geometry SliceGeometry(double startDeg, double endDeg, double inner, double outer)
     {
         if (endDeg - startDeg >= 359.9)
             return new CombinedGeometry(GeometryCombineMode.Exclude,
-                new EllipseGeometry(new Point(_cx, _cy), _outerR, _outerR),
-                new EllipseGeometry(new Point(_cx, _cy), _innerR, _innerR));
+                new EllipseGeometry(new Point(_cx, _cy), outer, outer),
+                new EllipseGeometry(new Point(_cx, _cy), inner, inner));
 
-        double outerOff = (GapPx / 2) / _outerR * 180 / Math.PI;
-        double innerOff = (GapPx / 2) / _innerR * 180 / Math.PI;
-        var p1 = OnCircle(startDeg + outerOff, _outerR);
-        var p2 = OnCircle(endDeg - outerOff, _outerR);
-        var p3 = OnCircle(endDeg - innerOff, _innerR);
-        var p4 = OnCircle(startDeg + innerOff, _innerR);
-        bool large = (endDeg - startDeg) > 180;
+        double outerOff = GapPx / 2 / outer * 180 / Math.PI;
+        double innerOff = GapPx / 2 / inner * 180 / Math.PI;
+        var p1 = OnCircle(startDeg + outerOff, outer);
+        var p2 = OnCircle(endDeg - outerOff, outer);
+        var p3 = OnCircle(endDeg - innerOff, inner);
+        var p4 = OnCircle(startDeg + innerOff, inner);
+        bool large = endDeg - startDeg > 180;
 
         var fig = new PathFigure { StartPoint = p1, IsClosed = true, IsFilled = true };
-        fig.Segments.Add(new ArcSegment(p2, new Size(_outerR, _outerR), 0, large, SweepDirection.Clockwise, true));
+        fig.Segments.Add(new ArcSegment(p2, new Size(outer, outer), 0, large, SweepDirection.Clockwise, true));
         fig.Segments.Add(new LineSegment(p3, true));
-        fig.Segments.Add(new ArcSegment(p4, new Size(_innerR, _innerR), 0, large, SweepDirection.Counterclockwise, true));
+        fig.Segments.Add(new ArcSegment(p4, new Size(inner, inner), 0, large, SweepDirection.Counterclockwise, true));
         var geo = new PathGeometry();
         geo.Figures.Add(fig);
         return geo;
@@ -555,7 +607,6 @@ public partial class WheelWindow : Window
         WheelCanvas.Children.Add(new Ellipse { Width = radius * 2, Height = radius * 2, Fill = fill }
             .At(_cx - radius, _cy - radius));
 
-    // Applies the global opacity to a colour (used for everything except swatches/images).
     private SolidColorBrush Tinted(Color c, double baseAlpha) =>
         new(Color.FromArgb((byte)Math.Clamp(baseAlpha * _opacity * 255, 0, 255), c.R, c.G, c.B));
 
@@ -577,28 +628,29 @@ public partial class WheelWindow : Window
         TextAlignment = align,
         TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
         TextTrimming = TextTrimming.CharacterEllipsis,
-        MaxHeight = 40,
+        MaxHeight = 42,
     };
 
     private TextBlock Label(string text, double x, double y, Brush fill, double size,
-                            bool center = false, bool bold = false, bool mono = false)
+                            bool center = false, bool mono = false)
     {
         var tb = new TextBlock
         {
             Text = text, Foreground = fill, FontSize = size,
-            FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
             FontFamily = mono ? new FontFamily("Cascadia Mono, Consolas") : new FontFamily("Segoe UI"),
             IsHitTestVisible = false, TextAlignment = TextAlignment.Center,
         };
         Canvas.SetTop(tb, y);
-        if (center) Center(tb, x); else Canvas.SetLeft(tb, x);
+        if (center) { tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); Canvas.SetLeft(tb, x - tb.DesiredSize.Width / 2); }
+        else Canvas.SetLeft(tb, x);
         return tb;
     }
 
-    private static void Center(TextBlock tb, double cx)
+    private double Measure(string text, double size, bool bold)
     {
+        var tb = new TextBlock { Text = text, FontSize = size, FontWeight = bold ? FontWeights.Bold : FontWeights.Normal, FontFamily = new FontFamily("Segoe UI") };
         tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        Canvas.SetLeft(tb, cx - tb.DesiredSize.Width / 2);
+        return tb.DesiredSize.Width;
     }
 }
 

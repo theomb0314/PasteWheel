@@ -21,6 +21,10 @@ public sealed class PasteNode
 
     public PasteKind Kind { get; init; } = PasteKind.Folder;
 
+    /// Slot number from a "NN_" prefix. Siblings sharing a number share one wedge's
+    /// arc (split into thin sub-wedges). Null = its own full-width wedge.
+    public int? SlotKey { get; init; }
+
     /// Parsed colour for Hex nodes; null otherwise.
     public Color? Swatch { get; init; }
 
@@ -61,8 +65,9 @@ public sealed class PasteStore
 
     public void Reload() => Root = LoadFolder(RootPath, isRoot: true);
 
-    // Reads one folder into a node, merging child folders that share a number prefix.
-    private PasteNode LoadFolder(string dir, bool isRoot = false)
+    // Reads one folder into a node. Each child folder keeps its own wedge; folders
+    // sharing a number prefix get the same SlotKey so the wheel splits one arc.
+    private PasteNode LoadFolder(string dir, bool isRoot = false, int? slotKey = null)
     {
         var (accent, icon) = ReadFolderMeta(dir);
         var node = new PasteNode
@@ -71,6 +76,7 @@ public sealed class PasteStore
             Path = dir,
             IsFolder = true,
             Kind = PasteKind.Folder,
+            SlotKey = slotKey,
             Accent = accent,
             Icon = icon,
         };
@@ -79,24 +85,9 @@ public sealed class PasteStore
 
         var subDirs = Directory.EnumerateDirectories(dir)
             .Where(d => !System.IO.Path.GetFileName(d).StartsWith('.'))
-            .OrderBy(SortKey, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        // Group folders by their numeric prefix; folders without one each stand alone.
-        var groups = new List<List<string>>();
-        var byNum = new Dictionary<int, List<string>>();
+            .OrderBy(SortKey, StringComparer.OrdinalIgnoreCase);
         foreach (var sub in subDirs)
-        {
-            int? num = ParsePrefixNum(System.IO.Path.GetFileName(sub));
-            if (num is int n && byNum.TryGetValue(n, out var g)) g.Add(sub);
-            else { var fresh = new List<string> { sub }; groups.Add(fresh); if (num is int n2) byNum[n2] = fresh; }
-        }
-
-        foreach (var group in groups)
-        {
-            if (group.Count == 1) node.Children.Add(LoadFolder(group[0]));
-            else node.Children.Add(MergeFolders(group));
-        }
+            node.Children.Add(LoadFolder(sub, slotKey: ParsePrefixNum(System.IO.Path.GetFileName(sub))));
 
         var files = Directory.EnumerateFiles(dir)
             .Where(IsPasteFile)
@@ -104,23 +95,6 @@ public sealed class PasteStore
         foreach (var file in files) node.Children.Add(LoadFile(file));
 
         return node;
-    }
-
-    // Combines several same-numbered folders into a single virtual wedge.
-    private PasteNode MergeFolders(List<string> dirs)
-    {
-        var members = dirs.Select(d => LoadFolder(d)).ToList();
-        var merged = new PasteNode
-        {
-            Label = string.Join(" / ", members.Select(m => m.Label).Distinct()),
-            Path = dirs[0],
-            IsFolder = true,
-            Kind = PasteKind.Folder,
-            Accent = members.FirstOrDefault(m => m.Accent != null)?.Accent,
-            Icon = members.FirstOrDefault(m => m.Icon != null)?.Icon,
-        };
-        foreach (var m in members) merged.Children.AddRange(m.Children);
-        return merged;
     }
 
     private static bool IsPasteFile(string file)
